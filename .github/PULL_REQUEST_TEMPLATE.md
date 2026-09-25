@@ -1,7 +1,7 @@
 ## Scope
 
 Closes #
-Affected [release-proof rows in issue #1](https://github.com/TheAdaply/reforge-brain/issues/1):
+Affected [release-proof rows in issue #1](https://github.com/TheAdaply/nemo/issues/1):
 Unchanged/not-applicable rows:
 
 ## Independent authorship
