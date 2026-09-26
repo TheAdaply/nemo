@@ -31,9 +31,11 @@ class FailedBuildRetryTest(unittest.TestCase):
             def connect_with_failure(*args, **kwargs):
                 return original_connect(*args, factory=FailingConnection, **kwargs)
 
-            with patch.object(retrieval.sqlite3, "connect", side_effect=connect_with_failure):
-                with self.assertRaises(retrieval.RetrievalError):
-                    retrieval.index_directory(str(root), str(db))
+            with (
+                patch.object(retrieval.sqlite3, "connect", side_effect=connect_with_failure),
+                self.assertRaises(retrieval.RetrievalError),
+            ):
+                retrieval.index_directory(str(root), str(db))
 
             self.assertTrue(injected, "failure must occur during FTS table creation")
             partial_db_remained = db.exists()
