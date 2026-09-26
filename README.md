@@ -2,7 +2,21 @@
 
 **Nemo never forgets.** An open-source, source-cited company brain for people and their agents. The product goal: connect a customer's Slack, meeting notes and documents; keep personal context separate from approved company knowledge; answer questions with links to the actual evidence; and improve memory through reviewable corrections rather than unverified agent guesses.
 
-**Status (2026-09-25): foundation in progress, not a customer-ready app.** The published repository has an Apache-2.0 license, the [test-first working agreement](AGENTS.md), a [required PR proof ledger](https://github.com/TheAdaply/nemo/issues/1), and detailed feature issues. Synthetic retrieval tests/fixtures were drafted locally for #2, but are **not committed, run, or proof of behavior**. The CLI engine does not yet install, index or search; no Slack, Notion or Granola connection is implemented. Do not ingest customer data or assume tenant authentication exists. Update this status only after a real smoke test.
+**Status (2026-09-26): offline retrieval baseline, not a customer-ready app.** The #2 CLI indexes an explicitly selected local directory and returns ranked, source-cited passages, not generated answers. In the observed synthetic run, it indexed 3 invented files as 9 one-line passages; `ORBIT-742` ranked `projects/orbit.md` line 1 first with its exact SHA-256 revision. All 7 behavioral tests passed, including symlink-swap and failed-build retry cases. A newly built wheel also installed in a fresh Python 3.12 environment, where index, search and evaluate worked. The tiny 5-query fixture scored Recall@10 = 1.0, nDCG@10 = 1.0 and 0 false hits for unanswerable queries; these numbers establish only this synthetic baseline, not general retrieval quality or enterprise security. Live Slack/Notion/Granola connections, trusted authentication, agent collaboration and self-improvement are **NOT IMPLEMENTED**. Do not ingest customer data.
+
+## Quickstart
+
+From the repository root with [uv](https://docs.astral.sh/uv/) installed:
+
+```sh
+uv sync --locked --python 3.12
+uv run --locked nemo index fixtures/synthetic/documents --db .nemo-demo.sqlite --json
+uv run --locked nemo search 'ORBIT-742' --db .nemo-demo.sqlite --json
+uv run --locked nemo evaluate fixtures/synthetic --json
+uv run --locked python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+Search returns passages with source paths, line spans and SHA-256 revisions. Lower FTS5 scores rank first, with an exact-ID boost. Keep the original files accessible: search checks their current revisions before returning passages.
 
 ## The end goal
 
@@ -14,7 +28,7 @@
 
 ## Progress and student-sized work
 
-- **First engine, [#2](https://github.com/TheAdaply/nemo/issues/2):** offline Python/SQLite FTS5 BM25 over an *explicitly selected* Markdown/text directory; ranked passages with source path, line span and SHA-256 revision; safe re-index/delete behavior; reproducible synthetic Recall@10/nDCG@10 scorer. A separate test author drafted cases locally; an importable engine, executed behavioral RED, GREEN and real CLI smoke are still missing. [#25](https://github.com/TheAdaply/nemo/issues/25) gates a clean, keyless quickstart once this is real.
+- **First engine, [#2](https://github.com/TheAdaply/nemo/issues/2):** offline Python/SQLite FTS5 BM25 over an *explicitly selected* Markdown/text directory; ranked passages with source path, line span and SHA-256 revision; reproducible synthetic Recall@10/nDCG@10 scorer. The observed local CLI and fresh-wheel smoke results are summarized above; [#25](https://github.com/TheAdaply/nemo/issues/25) tracks release proof for a clean, keyless quickstart.
 - **Customer-visible local demo, [#3–#11](https://github.com/TheAdaply/nemo/issues):** canonical source IDs, consented offline Slack/meeting/Notion sample imports, verified citations, extractive answers/abstention, project organization and human-reviewed decisions. These are issues, **not shipped integrations**.
 - **Identity and live connectors, [#12–#24](https://github.com/TheAdaply/nemo/issues):** trusted user/tenant scopes, personal versus shared memory, actual Slack/Notion/Granola setup and synchronization, safe Slack replies. These need provider consent, real sandbox verification and source-ACL checks before customer use.
 - **Quality, agent access and service, [#26–#40](https://github.com/TheAdaply/nemo/issues):** citation UI, reviewable corrections, read-only MCP, export, held-out evaluation, optional local retrieval challengers, retention, opt-in Reforge integration and enterprise operations.
