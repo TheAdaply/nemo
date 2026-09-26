@@ -1,0 +1,7 @@
+[
+  {"id": "exact-id", "query": "ORBIT-742", "relevant_paths": ["projects/orbit.md"]},
+  {"id": "paraphrase", "query": "Who signs the harbor permit?", "relevant_paths": ["records/permit.txt"]},
+  {"id": "current-vs-old", "query": "current launch gate ORBIT-742", "relevant_paths": ["projects/orbit.md"]},
+  {"id": "absent", "query": "polkaquartz", "relevant_paths": []},
+  {"id": "citation", "query": "Where is approval evidence filed?", "relevant_paths": ["records/permit.txt"]}
+]
