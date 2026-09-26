@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "theadaply-nemo"
+version = "0.0.0"
+description = "Offline retrieval CLI for explicitly selected files"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+nemo = "nemo_memory.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_memory"]
