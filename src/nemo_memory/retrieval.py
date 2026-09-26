@@ -181,12 +181,15 @@ def _match_expression(query: str) -> str:
     return " OR ".join(clauses)
 
 
-def _source_is_current(root: Path, relative: str, revision: str) -> bool:
+def _current_source_lines(root: Path, relative: str, revision: str) -> list[str] | None:
     try:
         with _directory_fd(root) as root_fd:
-            return "sha256:" + hashlib.sha256(_read_source(root_fd, relative)).hexdigest() == revision
-    except (OSError, ValueError):
-        return False
+            raw = _read_source(root_fd, relative)
+        if "sha256:" + hashlib.sha256(raw).hexdigest() != revision:
+            return None
+        return raw.decode("utf-8").splitlines()
+    except (OSError, UnicodeError, ValueError):
+        return None
 
 
 def search_index(query: str, db: str) -> list[dict]:
@@ -218,11 +221,14 @@ def search_index(query: str, db: str) -> list[dict]:
 
     identifiers = {match.group().casefold() for match in _IDENTIFIERS.finditer(query)}
     hits = []
-    current = {}
+    source_lines: dict[str, list[str] | None] = {}
     for path, start, end, revision, passage, bm25_score in rows:
-        if path not in current:
-            current[path] = _source_is_current(root, path, revision)
-        if not current[path]:
+        if path not in source_lines:
+            source_lines[path] = _current_source_lines(root, path, revision)
+        lines = source_lines[path]
+        if (lines is None or not isinstance(start, int) or not isinstance(end, int)
+                or start < 1 or end < start or end > len(lines)
+                or "\n".join(lines[start - 1:end]) != passage):
             continue
         # SQLite FTS5 BM25 is negative: more relevant passages have lower values.
         # An exact identifier in the cited line resolves close document distractors.
