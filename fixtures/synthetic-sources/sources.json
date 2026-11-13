@@ -1,0 +1,33 @@
+[
+  {
+    "provider": "notion",
+    "native_id": "page-harbor-001",
+    "tenant": "synthetic-acme",
+    "path": "notion/harbor-launch.md",
+    "title": "Launch plan",
+    "author": "Mara Vale",
+    "created_at": "2026-09-01T09:30:00+00:00",
+    "uri": "https://notion.example/synthetic-acme/page-harbor-001",
+    "visibility": "notion:synthetic-acme/teamspace/harbor"
+  },
+  {
+    "provider": "notion",
+    "native_id": "page-orbit-002",
+    "tenant": "synthetic-acme",
+    "path": "notion/orbit-launch.md",
+    "title": "Launch plan",
+    "author": "Ivo Renn",
+    "created_at": "2026-09-02T14:00:00+00:00",
+    "uri": "https://notion.example/synthetic-acme/page-orbit-002",
+    "visibility": "notion:synthetic-acme/teamspace/orbit"
+  },
+  {
+    "provider": "slack",
+    "native_id": "C100SYNTH/1757000000.000100",
+    "tenant": "synthetic-acme",
+    "path": "slack/retro-reminder.txt",
+    "title": "#retro message",
+    "author": "Ivo Renn",
+    "created_at": "2026-09-04T16:13:20+00:00"
+  }
+]
