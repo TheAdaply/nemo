@@ -18,6 +18,19 @@ uv run --locked python -m unittest discover -s tests -p 'test_*.py' -v
 
 Search returns passages with source paths, line spans and SHA-256 revisions. Lower FTS5 scores rank first, with an exact-ID boost. Keep the original files accessible: search checks their current revisions before returning passages.
 
+### Source records ([#3](https://github.com/TheAdaply/nemo/issues/3))
+
+Every hit also carries a `source` object: canonical `id`, `provider`, `native_id`, `tenant`, `title`, `author`, `created_at`, `uri`, `visibility` and the SHA-256 `revision` its line span cites. The `id` is built from provider, tenant and provider-native ID, so two documents with the same title stay distinct and a revised document keeps its ID while its revision changes. A plainly indexed file is reported as provider `file`, tenant `local`.
+
+To index sources that came from somewhere else, list them explicitly in a JSON manifest whose paths are relative to the indexed directory:
+
+```sh
+uv run --locked nemo index fixtures/synthetic-sources/documents --sources fixtures/synthetic-sources/sources.json --db .nemo-sources.sqlite --json
+uv run --locked nemo search '"Launch plan"' --db .nemo-sources.sqlite --json
+```
+
+With `--sources`, only the listed files are indexed. A `uri` or `visibility` the manifest does not give is returned as `null`, never guessed, and an invalid or duplicate record rejects the whole import and leaves the previous index in place. This is an offline import of files you selected, **not** a live Slack/Notion connector, and `tenant` is a label from the manifest, **not** authentication: nothing here filters results by who is asking. An index built before this change must be rebuilt with `nemo index`.
+
 ## The end goal
 
 1. **Easy customer setup:** an admin installs or hosts Nemo and explicitly authorizes only selected Slack channels, Notion pages and Granola meeting notes. Sync status, lag, revocation and deletion are visible.
