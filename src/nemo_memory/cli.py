@@ -11,9 +11,20 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nemo")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    index = commands.add_parser("index", help="Index an explicitly chosen directory")
+    index = commands.add_parser(
+        "index",
+        help="Index an explicitly chosen directory",
+        description="Index the Markdown/text files under ROOT, or with --sources exactly the "
+                    "sources a manifest lists. This is an offline import of files you chose, "
+                    "not a live connector. A manifest's tenant is a label, not authentication.",
+    )
     index.add_argument("root", metavar="ROOT")
     index.add_argument("--db", required=True, metavar="INDEX")
+    index.add_argument(
+        "--sources", metavar="MANIFEST",
+        help="JSON array of source records (provider, native_id, tenant, path, title; optional "
+             "author, created_at, uri, visibility) whose paths are relative to ROOT",
+    )
     index.add_argument("--json", action="store_true")
 
     search = commands.add_parser("search", help="Search an existing index")
@@ -32,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "index":
-            result = index_directory(args.root, args.db)
+            result = index_directory(args.root, args.db, args.sources)
             if args.json:
                 print(json.dumps(result, ensure_ascii=False))
             else:
@@ -47,6 +58,10 @@ def main(argv: list[str] | None = None) -> int:
                 for hit in hits:
                     print(f"{hit['path']}:{hit['start_line']}-{hit['end_line']} "
                           f"({hit['revision']}, score {hit['score']:.6g})")
+                    source = hit["source"]
+                    print(f"  source {source['id']} | {source['title']} | "
+                          f"uri: {source['uri'] or 'not provided'} | "
+                          f"visibility: {source['visibility'] or 'not provided'}")
                     print(hit["text"])
         else:
             evaluation = evaluate_fixture(args.fixture_dir)

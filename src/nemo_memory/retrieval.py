@@ -13,13 +13,15 @@ from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 from urllib.parse import quote
 
+from .sources import SourceError, SourceRecord, file_source, load_manifest
+
 
 class RetrievalError(Exception):
     """An expected input or local index error suitable for CLI display."""
 
 
 _APPLICATION_ID = 0x4E454D4F  # NEMO
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2  # 2 added canonical source IDs and metadata
 _WORDS = re.compile(r"\w+(?:-\w+)*", re.UNICODE)
 _QUERY_PARTS = re.compile(r'"([^"]*)"|([^\s"]+)')
 _IDENTIFIERS = re.compile(r"\b[A-Za-z]+-\d+\b")
@@ -60,7 +62,7 @@ def _read_source(root_fd: int, relative: str) -> bytes:
             return handle.read()
 
 
-def _documents(root: str):
+def _documents(root: str) -> Iterator[tuple[str, str, list[str]]]:
     chosen = Path(root)
     if chosen.is_symlink() or not chosen.is_dir():
         raise RetrievalError(f"root must be an existing, non-symlink directory: {chosen}")
@@ -95,11 +97,36 @@ def _documents(root: str):
         raise RetrievalError(f"cannot traverse selected root {boundary}: {exc}") from exc
 
 
-def _check_index(connection: sqlite3.Connection) -> None:
+def _listed_documents(root: str, records: list[SourceRecord]) -> Iterator[tuple[str, list[str]]]:
+    """Read exactly the files a manifest lists, confined to the selected root."""
+    chosen = Path(root)
+    if chosen.is_symlink() or not chosen.is_dir():
+        raise RetrievalError(f"root must be an existing, non-symlink directory: {chosen}")
+    boundary = chosen.resolve()
+    try:
+        with _directory_fd(boundary) as root_fd:
+            for record in records:
+                try:
+                    raw = _read_source(root_fd, record.path)
+                    lines = raw.decode("utf-8").splitlines()
+                except (OSError, UnicodeError, ValueError) as exc:
+                    raise RetrievalError(
+                        f"cannot read UTF-8 source {record.id} at {record.path!r}: {exc}"
+                    ) from exc
+                yield "sha256:" + hashlib.sha256(raw).hexdigest(), lines
+    except OSError as exc:
+        raise RetrievalError(f"cannot traverse selected root {boundary}: {exc}") from exc
+
+
+def _check_index(connection: sqlite3.Connection, replacing: bool = False) -> None:
     application_id = connection.execute("PRAGMA application_id").fetchone()[0]
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if application_id != _APPLICATION_ID or version != _SCHEMA_VERSION:
+    if application_id != _APPLICATION_ID or not 1 <= version <= _SCHEMA_VERSION:
         raise RetrievalError("database is not a supported Nemo index")
+    if replacing:
+        return  # any earlier Nemo index may be replaced by a fresh build
+    if version != _SCHEMA_VERSION:
+        raise RetrievalError("index was built by an older Nemo; rebuild it with `nemo index`")
     required = {"metadata", "sources", "passages", "passage_fts"}
     found = {row[0] for row in connection.execute(
         "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
@@ -108,9 +135,20 @@ def _check_index(connection: sqlite3.Connection) -> None:
         raise RetrievalError("Nemo index schema is incomplete or corrupt")
 
 
-def index_directory(root: str, db: str) -> dict[str, int]:
+def index_directory(root: str, db: str, manifest: str | None = None) -> dict[str, int]:
+    """Build the index from every Markdown/text file under ``root`` or, with ``manifest``,
+    from exactly the source records that manifest lists."""
     # Read the complete selected snapshot before changing the persistent index.
-    sources = list(_documents(root))
+    sources: list[tuple[SourceRecord, str, list[str]]]
+    if manifest is None:
+        sources = [(file_source(path), revision, lines) for path, revision, lines in _documents(root)]
+    else:
+        try:
+            records = load_manifest(manifest)
+        except SourceError as exc:
+            raise RetrievalError(str(exc)) from exc
+        sources = [(record, revision, lines)
+                   for record, (revision, lines) in zip(records, _listed_documents(root, records))]
     db_path = Path(db)
     temporary_path = None
     try:
@@ -126,10 +164,15 @@ def index_directory(root: str, db: str) -> dict[str, int]:
             connection.execute("DROP TABLE IF EXISTS metadata")
             connection.execute("CREATE TABLE metadata (root TEXT NOT NULL)")
             connection.execute("INSERT INTO metadata(root) VALUES (?)", (str(Path(root).resolve()),))
-            connection.execute("CREATE TABLE sources (path TEXT PRIMARY KEY, revision TEXT NOT NULL)")
             connection.execute(
-                "CREATE TABLE passages (id INTEGER PRIMARY KEY, path TEXT NOT NULL "
-                "REFERENCES sources(path), start_line INTEGER NOT NULL, "
+                "CREATE TABLE sources (id TEXT PRIMARY KEY, provider TEXT NOT NULL, "
+                "native_id TEXT NOT NULL, tenant TEXT NOT NULL, path TEXT NOT NULL, "
+                "revision TEXT NOT NULL, title TEXT NOT NULL, author TEXT, created_at TEXT, "
+                "uri TEXT, visibility TEXT)"
+            )
+            connection.execute(
+                "CREATE TABLE passages (id INTEGER PRIMARY KEY, source_id TEXT NOT NULL "
+                "REFERENCES sources(id), path TEXT NOT NULL, start_line INTEGER NOT NULL, "
                 "end_line INTEGER NOT NULL, text TEXT NOT NULL)"
             )
             connection.execute(
@@ -137,14 +180,21 @@ def index_directory(root: str, db: str) -> dict[str, int]:
                 "text, content='passages', content_rowid='id', tokenize='unicode61')"
             )
             passages = 0
-            for path, revision, lines in sources:
-                connection.execute("INSERT INTO sources(path, revision) VALUES (?, ?)", (path, revision))
+            for record, revision, lines in sources:
+                connection.execute(
+                    "INSERT INTO sources(id, provider, native_id, tenant, path, revision, title, "
+                    "author, created_at, uri, visibility) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (record.id, record.provider, record.native_id, record.tenant, record.path,
+                     revision, record.title, record.author, record.created_at, record.uri,
+                     record.visibility),
+                )
                 for line_number, line in enumerate(lines, 1):
                     if not line.strip():
                         continue
                     connection.execute(
-                        "INSERT INTO passages(path, start_line, end_line, text) VALUES (?, ?, ?, ?)",
-                        (path, line_number, line_number, line),
+                        "INSERT INTO passages(source_id, path, start_line, end_line, text) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (record.id, record.path, line_number, line_number, line),
                     )
                     passages += 1
             connection.execute("INSERT INTO passage_fts(passage_fts) VALUES ('rebuild')")
@@ -155,7 +205,7 @@ def index_directory(root: str, db: str) -> dict[str, int]:
         if db_path.exists():
             uri = "file:" + quote(str(db_path.resolve()), safe="/") + "?mode=ro"
             with closing(sqlite3.connect(uri, uri=True)) as existing:
-                _check_index(existing)
+                _check_index(existing, replacing=True)
         os.replace(temporary_path, db_path)
         temporary_path = None
     except (OSError, sqlite3.Error) as exc:
@@ -210,9 +260,10 @@ def search_index(query: str, db: str) -> list[dict]:
                 return []
             rows = connection.execute(
                 "SELECT p.path, p.start_line, p.end_line, s.revision, p.text, "
-                "bm25(passage_fts) FROM passage_fts "
+                "bm25(passage_fts), s.id, s.provider, s.native_id, s.tenant, s.title, "
+                "s.author, s.created_at, s.uri, s.visibility FROM passage_fts "
                 "JOIN passages AS p ON p.id = passage_fts.rowid "
-                "JOIN sources AS s ON s.path = p.path "
+                "JOIN sources AS s ON s.id = p.source_id AND s.path = p.path "
                 "WHERE passage_fts MATCH ?",
                 (expression,),
             ).fetchall()
@@ -222,10 +273,11 @@ def search_index(query: str, db: str) -> list[dict]:
     identifiers = {match.group().casefold() for match in _IDENTIFIERS.finditer(query)}
     hits = []
     source_lines: dict[str, list[str] | None] = {}
-    for path, start, end, revision, passage, bm25_score in rows:
-        if path not in source_lines:
-            source_lines[path] = _current_source_lines(root, path, revision)
-        lines = source_lines[path]
+    for (path, start, end, revision, passage, bm25_score, source_id, provider, native_id,
+         tenant, title, author, created_at, uri, visibility) in rows:
+        if source_id not in source_lines:
+            source_lines[source_id] = _current_source_lines(root, path, revision)
+        lines = source_lines[source_id]
         if (lines is None or not isinstance(start, int) or not isinstance(end, int)
                 or start < 1 or end < start or end > len(lines)
                 or "\n".join(lines[start - 1:end]) != passage):
@@ -238,9 +290,17 @@ def search_index(query: str, db: str) -> list[dict]:
         score = float(bm25_score) - identifier_boost
         if not math.isfinite(score):
             raise RetrievalError("index returned a non-finite ranking score")
-        hits.append({"path": path, "start_line": start, "end_line": end,
-                     "revision": revision, "text": passage, "score": score})
-    hits.sort(key=lambda hit: (hit["score"], hit["path"], hit["start_line"]))
+        hits.append({
+            "path": path, "start_line": start, "end_line": end,
+            "revision": revision, "text": passage, "score": score,
+            # uri and visibility stay None when the import did not supply them
+            "source": {
+                "id": source_id, "provider": provider, "native_id": native_id, "tenant": tenant,
+                "title": title, "author": author, "created_at": created_at, "uri": uri,
+                "visibility": visibility, "revision": revision,
+            },
+        })
+    hits.sort(key=lambda hit: (hit["score"], hit["path"], hit["start_line"], hit["source"]["id"]))
     return hits
 
 
